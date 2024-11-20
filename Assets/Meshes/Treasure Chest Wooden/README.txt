@@ -1,0 +1,1 @@
+Texture repeating should be set to Mirror instead of Repeat/Tile. In Blender, as of version 3.5.0, this can be done on the image texture node in the shader editor.
