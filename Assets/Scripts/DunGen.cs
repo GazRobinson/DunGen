@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using UnityEditor;
 using UnityEngine;
 
 [System.Serializable]
@@ -25,6 +26,7 @@ public class DunGenParams
     public int MaxDistIterations = 1000;
 
     public Material corridorMat;
+    public float NudgeMultiplier = 0.5f;
 }
 
 [System.Serializable]
@@ -35,6 +37,7 @@ public class DebugStuff
     public bool drawPathfinder = true;
     public bool verbose = true;
     public bool slow = true;
+    public bool vSlow = true;
 }
 
 [System.Serializable]
@@ -55,9 +58,15 @@ struct Connection
 
 
 [System.Serializable]
-class RoomTiles
+public class RoomTiles
 {
-    public GameObject Floor;
+    [Range(0.0f, 1.0f)]
+    public float FloorDetailChance = 0.1f;
+    [Range(0.0f, 1.0f)]
+    public float FloorRockChance = 0.05f;
+
+    public GameObject[] Floor;
+    public GameObject Rocks;
     public GameObject Wall;
     public GameObject Corner;
     public GameObject Door;
@@ -67,6 +76,7 @@ public class DunGen : MonoBehaviour
 {
     public DunGenParams args;
     public Assets mapAssets;
+    public RoomTiles mapTiles;
     public DebugStuff debugStuff;
     public List<Room> rooms = new List<Room>();
 
@@ -77,6 +87,7 @@ public class DunGen : MonoBehaviour
     private Room start = null;
     private Room boss = null;
     private Room currentRoom = null;
+    private Graph<Room> roomGraph;
     IEnumerator Gen()
     {
         CreateRooms();
@@ -85,6 +96,7 @@ public class DunGen : MonoBehaviour
         yield return StartCoroutine(DistributeRooms());
         yield return StartCoroutine(LinkRooms());
         yield return StartCoroutine(ConnectRooms());
+        yield return StartCoroutine(BuildRooms());
         yield return StartCoroutine(Pathfind());
     }
 
@@ -92,8 +104,11 @@ public class DunGen : MonoBehaviour
     {
         for(int i =0; i < args.RoomsToGenerate; i++)
         {
+            float radius = Mathf.Sqrt(args.RoomsToGenerate) * Mathf.Sqrt(args.roomDefinition.MinArea);
+            Vector2 p = Random.insideUnitCircle* radius * 0.5f;
+            Vector3 pos = new Vector3(p.x, 0.0f, p.y);
             rooms.Add(Instantiate<Room>(roomFab));
-            rooms.Last().Init(args.roomDefinition.MinArea, args.roomDefinition.MaxArea, args.roomDefinition.Buffer);
+            rooms.Last().Init(args.roomDefinition.MinArea, args.roomDefinition.MaxArea, args.roomDefinition.Buffer, pos);
             rooms.Last().gameObject.name = "Room " + i;
         }
     }
@@ -118,17 +133,28 @@ public class DunGen : MonoBehaviour
                             Vector3.Min(rooms[j].bounds.max, rooms[k].bounds.max));
                         Vector3 s = b.size;
                         s.y = 0.0f;
-                        s.x = Random.value > 0.5f ? -s.x : s.x;
-                        s.z = Random.value > 0.5f ? -s.z : s.z;
+                        s.x = rooms[j].Position.x < rooms[k].Position.x ? -s.x : s.x;
+                        s.z = rooms[j].Position.z < rooms[k].Position.z ? -s.z : s.z;
+                        if (Mathf.Abs(s.x) < Mathf.Abs(s.z))
+                        {
+                            s.z = 0.0f;
+                        }
+                        else
+                        {
+                            s.x = 0.0f;
+                        }
+                        //s.z = Random.value > 0.5f ? -s.z : s.z;
                         b.size = s;
                         if (s.magnitude > 1.0f)
                         {
-                            rooms[j].Nudge(-b.size / 2);
-                            rooms[k].Nudge(b.size / 2);
+                            rooms[j].Nudge(b.size * args.NudgeMultiplier);
+                            rooms[k].Nudge(-b.size  * args.NudgeMultiplier);
                             moves++;
                         }
                     }
                 }
+                if (debugStuff.vSlow)
+                    yield return new WaitForEndOfFrame();
             }
             if(debugStuff.slow)
                 yield return new WaitForSeconds(0.025f);
@@ -181,19 +207,31 @@ public class DunGen : MonoBehaviour
             t.LookAt(t.position + Vector3.back);
         }
         if (debugStuff.slow)
-            yield return new WaitForSeconds(1.0f);
+            yield return new WaitForSeconds(0.5f);
     }
 
     IEnumerator LinkRooms()
     {
-        yield return new WaitForEndOfFrame();
+        roomGraph = new Graph<Room>();
+        for (int i = 0; i < rooms.Count; i++)
+        {
+            roomGraph.AddNode(rooms[i]);
+        }
+
+            yield return new WaitForEndOfFrame();
         List<Room> nearRooms = new List<Room>(rooms);
         for (int i = 0; i < rooms.Count; i++)
         {
             nearRooms = new List<Room>(rooms);
             nearRooms.Remove(rooms[i]);
-            nearRooms.Sort((a, b) => Vector3.Distance(rooms[i].Position, a.Position) > Vector3.Distance(rooms[i].Position, b.Position) ? 1 : -1);
-
+            try
+            {
+                nearRooms.Sort((a, b) => Vector3.Distance(rooms[i].Position, a.Position) > Vector3.Distance(rooms[i].Position, b.Position) ? 1 : -1);
+            }
+            catch(System.Exception e)
+            {
+                Debug.LogException(e);
+            }
             List<Room> validRooms = new List<Room>();
             int cons = Random.Range(2, 4);
             for (int j = 0; j < cons; j++)
@@ -230,6 +268,7 @@ public class DunGen : MonoBehaviour
             }
             foreach (Room rm in validRooms)
             {
+                roomGraph.AddUndirectedEdge(rooms[i], rm, Mathf.FloorToInt(Vector3.Distance(rooms[i].Position, rm.Position)));
                 rooms[i].connections.Add(rm);
                 rm.connections.Add(rooms[i]);
             }
@@ -290,6 +329,17 @@ public class DunGen : MonoBehaviour
 
             if (debugStuff.slow)
                 yield return new WaitForSeconds(0.05f);
+        }
+    }
+
+    IEnumerator BuildRooms()
+    {
+        yield return new WaitForEndOfFrame();
+        for (int i = 0; i < rooms.Count; i++)
+        {
+            rooms[i].BuildRoom(ref mapTiles);
+            if(debugStuff.slow)
+                yield return new WaitForSeconds(0.15f);
         }
     }
 
@@ -427,15 +477,25 @@ public class DunGen : MonoBehaviour
     private void OnDrawGizmos()
     {
         Gizmos.color = Color.green;
-        if (debugStuff.drawConnections && rooms.Count > 0)
+        if (debugStuff.drawConnections && roomGraph != null)
         {
-            foreach (Room rm in rooms)
+            /*foreach (Room rm in rooms)
             {
                 if (rm.connections.Count > 0)
                 {
                     foreach (Room rm2 in rm.connections)
                     {
                         Gizmos.DrawLine(rm.Position, rm2.Position);
+                    }
+                }
+            }*/
+            for(int i=0; i < roomGraph.Nodes.Count; i++)
+            {
+                if (roomGraph.Nodes[i].Neighbors != null && roomGraph.Nodes[i].Neighbors.Count > 0)
+                {
+                    for (int j=0; j < roomGraph.Nodes[i].Neighbors.Count; j++)
+                    {
+                        Gizmos.DrawLine(roomGraph.Nodes[i].Value.Position, roomGraph.Nodes[i].Neighbors[j].Value.Position);
                     }
                 }
             }

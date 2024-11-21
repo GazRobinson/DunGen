@@ -13,18 +13,18 @@ OcclusionCullingSettings:
 --- !u!104 &2
 RenderSettings:
   m_ObjectHideFlags: 0
-  serializedVersion: 9
+  serializedVersion: 10
   m_Fog: 0
   m_FogColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
   m_FogMode: 3
   m_FogDensity: 0.01
   m_LinearFogStart: 0
   m_LinearFogEnd: 300
-  m_AmbientSkyColor: {r: 0.212, g: 0.227, b: 0.259, a: 1}
+  m_AmbientSkyColor: {r: 1, g: 1, b: 1, a: 1}
   m_AmbientEquatorColor: {r: 0.114, g: 0.125, b: 0.133, a: 1}
   m_AmbientGroundColor: {r: 0.047, g: 0.043, b: 0.035, a: 1}
   m_AmbientIntensity: 1
-  m_AmbientMode: 0
+  m_AmbientMode: 3
   m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
   m_SkyboxMaterial: {fileID: 10304, guid: 0000000000000000f000000000000000, type: 0}
   m_HaloStrength: 0.5
@@ -38,13 +38,12 @@ RenderSettings:
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 705507994}
-  m_IndirectSpecularColor: {r: 0.44141504, g: 0.48288935, b: 0.5305569, a: 1}
+  m_IndirectSpecularColor: {r: 0, g: 0, b: 0, a: 1}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 12
-  m_GIWorkflowMode: 1
   m_GISettings:
     serializedVersion: 2
     m_BounceScale: 1
@@ -67,9 +66,6 @@ LightmapSettings:
     m_LightmapParameters: {fileID: 0}
     m_LightmapsBakeMode: 1
     m_TextureCompression: 1
-    m_FinalGather: 0
-    m_FinalGatherFiltering: 1
-    m_FinalGatherRayCount: 256
     m_ReflectionCompression: 2
     m_MixedBakeMode: 2
     m_BakeBackend: 1
@@ -179,9 +175,8 @@ Light:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 705507993}
   m_Enabled: 1
-  serializedVersion: 10
+  serializedVersion: 11
   m_Type: 1
-  m_Shape: 0
   m_Color: {r: 1, g: 0.95686275, b: 0.8392157, a: 1}
   m_Intensity: 1
   m_Range: 10
@@ -189,7 +184,7 @@ Light:
   m_InnerSpotAngle: 21.80208
   m_CookieSize: 10
   m_Shadows:
-    m_Type: 2
+    m_Type: 1
     m_Resolution: -1
     m_CustomResolution: -1
     m_Strength: 1
@@ -241,7 +236,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 705507993}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.085446134, y: 0.14527594, z: -0.16428219, w: -0.97190803}
+  m_LocalRotation: {x: 0.80141467, y: -0.41915587, z: -0.016767278, w: 0.42633528}
   m_LocalPosition: {x: 0, y: 3, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -453,13 +448,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   args:
-    RoomsToGenerate: 30
+    RoomsToGenerate: 50
     roomDefinition:
-      MinArea: 4
-      MaxArea: 30
-      Buffer: 1.1
-    MaxDistIterations: 2000
+      MinArea: 50
+      MaxArea: 100
+      Buffer: 1.01
+    MaxDistIterations: 10000
     corridorMat: {fileID: 2100000, guid: 677a7378d64206e4482998417ebc621a, type: 2}
+    NudgeMultiplier: 0.5
   mapAssets:
     chest: {fileID: 919132149155446097, guid: 73c69f00c224813468053a1c247ccac1, type: 3}
     smallKey: {fileID: 919132149155446097, guid: 54a67fade50c7664cba6a614523f4b17, type: 3}
@@ -467,10 +463,23 @@ MonoBehaviour:
     smallLock: {fileID: 919132149155446097, guid: 7357163cc96d6a14d851091417650d6a, type: 3}
     bigLock: {fileID: 919132149155446097, guid: c59d83e287f15ef49a4527f1188a362f, type: 3}
     skull: {fileID: 919132149155446097, guid: 61f79173b22f3bd47bd2e9dfb8a4818f, type: 3}
+  mapTiles:
+    FloorDetailChance: 0.1
+    FloorRockChance: 0.1
+    Floor:
+    - {fileID: 919132149155446097, guid: 30f2a49260fe1cd4d891657ed42e0336, type: 3}
+    - {fileID: 919132149155446097, guid: 6964135bfbd4d174f8750fdbe4d40c81, type: 3}
+    Rocks: {fileID: 919132149155446097, guid: 7ee757d7642fdec4681871fcf45d4ad5, type: 3}
+    Wall: {fileID: 919132149155446097, guid: 4d8a3061508a68c4daea7b4fc71a538b, type: 3}
+    Corner: {fileID: 919132149155446097, guid: 15cc10fa0428e91478e8a738884fec1d, type: 3}
+    Door: {fileID: 919132149155446097, guid: 683efed1999ef5d4b84a07ee65509b16, type: 3}
   debugStuff:
     drawConnections: 1
     drawPath: 1
     drawPathfinder: 1
+    verbose: 0
+    slow: 0
+    vSlow: 0
   rooms: []
   roomFab: {fileID: 2357812852105400129, guid: 23207eb6496870f4792e12144e785052, type: 3}
 --- !u!4 &2009674167
