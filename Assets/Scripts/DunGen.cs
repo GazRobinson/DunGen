@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
+using Diag = System.Diagnostics;
 
 [System.Serializable]
 public class RoomDetails
@@ -27,6 +28,9 @@ public class DunGenParams
 
     public Material corridorMat;
     public float NudgeMultiplier = 0.5f;
+
+    public bool BuildRooms = true;
+    public bool LinkRooms = true;
 }
 
 [System.Serializable]
@@ -35,6 +39,7 @@ public class DebugStuff
     public bool drawConnections = true;
     public bool drawPath = true;
     public bool drawPathfinder = true;
+    public bool drawBounds = true;
     public bool verbose = true;
     public bool slow = true;
     public bool vSlow = true;
@@ -82,22 +87,61 @@ public class DunGen : MonoBehaviour
 
     public Room roomFab = null;
     List<Room> path = null;
+    List<System.Tuple<Room, Room>> MST_Path = null;
 
 
     private Room start = null;
     private Room boss = null;
     private Room currentRoom = null;
     private Graph<Room> roomGraph;
+    private Bounds fullBounds = new Bounds();
+
+    //Debug
+    private Diag.Stopwatch stopwatch;
+
     IEnumerator Gen()
     {
+        Diag.Stopwatch GenWatch = Diag.Stopwatch.StartNew();
+        if (Diag.Stopwatch.IsHighResolution)
+            Debug.Log("Using High Res stopwatch");
+        stopwatch = Diag.Stopwatch.StartNew();
         CreateRooms();
+        Debug.Log($"Create Rooms in: {stopwatch.ElapsedMilliseconds}ms"); stopwatch.Restart();
+
+
         yield return StartCoroutine(DistributeRooms());
+        Debug.Log($"Distribute Rooms in: {stopwatch.ElapsedMilliseconds}ms"); stopwatch.Restart();
+
         yield return StartCoroutine(StartAndEnd());
+        Debug.Log($"Start and End in: {stopwatch.ElapsedMilliseconds}ms"); stopwatch.Restart();
+
         yield return StartCoroutine(DistributeRooms());
-        yield return StartCoroutine(LinkRooms());
-        yield return StartCoroutine(ConnectRooms());
-        yield return StartCoroutine(BuildRooms());
-        yield return StartCoroutine(Pathfind());
+        Debug.Log($"Re-Distribute Rooms in: {stopwatch.ElapsedMilliseconds}ms"); stopwatch.Restart();
+
+        for (int i = 0; i < rooms.Count; i++)
+        {
+            fullBounds.Encapsulate(rooms[i].bounds);
+        }
+        Camera.main.orthographicSize = Mathf.Max(fullBounds.extents.x, fullBounds.extents.z) * 1.1f;
+        Camera.main.transform.position = new Vector3(fullBounds.center.x, 20.0f, fullBounds.center.z);
+        Debug.Log($"Complete. Bounds are {fullBounds.size}");
+
+
+        if (args.BuildRooms)
+        {
+            yield return StartCoroutine(BuildRooms());
+            Debug.Log($"Build Rooms in: {stopwatch.ElapsedMilliseconds}ms"); stopwatch.Restart();
+        }
+        if (args.LinkRooms)
+        {
+            yield return StartCoroutine(LinkRooms());
+            Debug.Log($"Link Rooms in: {stopwatch.ElapsedMilliseconds}ms"); stopwatch.Restart();
+            //yield return StartCoroutine(ConnectRooms()); //This was for when I used LineRenderers. Could come back
+            yield return StartCoroutine(Pathfind());
+            Debug.Log($"Pathfind in: {stopwatch.ElapsedMilliseconds}ms"); stopwatch.Restart();
+        }
+        Debug.Log($"Total Generation in: {GenWatch.ElapsedMilliseconds}ms");
+        GenWatch.Stop();
     }
 
     void CreateRooms()
@@ -118,6 +162,7 @@ public class DunGen : MonoBehaviour
         yield return new WaitForSeconds(0.1f);
         int i = 0;
         int moves = 0;
+        Bounds b = new Bounds();
         while (i < args.MaxDistIterations)
         {
             for (int j = 0; j < rooms.Count; j++)
@@ -126,30 +171,32 @@ public class DunGen : MonoBehaviour
                 {
                     if (j == k)
                         continue;
-                    if (rooms[j].bounds.Intersects(rooms[k].bounds))
+                    if (Room.QuickOverlap(rooms[j], rooms[k])) 
                     {
-                        Bounds b = new Bounds();
-                        b.SetMinMax(Vector3.Max(rooms[j].bounds.min, rooms[k].bounds.min),
-                            Vector3.Min(rooms[j].bounds.max, rooms[k].bounds.max));
-                        Vector3 s = b.size;
-                        s.y = 0.0f;
-                        s.x = rooms[j].Position.x < rooms[k].Position.x ? -s.x : s.x;
-                        s.z = rooms[j].Position.z < rooms[k].Position.z ? -s.z : s.z;
-                        if (Mathf.Abs(s.x) < Mathf.Abs(s.z))
+                        if (rooms[j].bounds.Intersects(rooms[k].bounds))
                         {
-                            s.z = 0.0f;
-                        }
-                        else
-                        {
-                            s.x = 0.0f;
-                        }
-                        //s.z = Random.value > 0.5f ? -s.z : s.z;
-                        b.size = s;
-                        if (s.magnitude > 1.0f)
-                        {
-                            rooms[j].Nudge(b.size * args.NudgeMultiplier);
-                            rooms[k].Nudge(-b.size  * args.NudgeMultiplier);
-                            moves++;
+                            b.SetMinMax(Vector3.Max(rooms[j].bounds.min, rooms[k].bounds.min),
+                                Vector3.Min(rooms[j].bounds.max, rooms[k].bounds.max));
+                            Vector3 s = b.size;
+                            s.y = 0.0f;
+                            s.x = rooms[j].Position.x < rooms[k].Position.x ? -s.x : s.x;
+                            s.z = rooms[j].Position.z < rooms[k].Position.z ? -s.z : s.z;
+                            if (Mathf.Abs(s.x) < Mathf.Abs(s.z))
+                            {
+                                s.z = 0.0f;
+                            }
+                            else
+                            {
+                                s.x = 0.0f;
+                            }
+                            //s.z = Random.value > 0.5f ? -s.z : s.z;
+                            b.size = s;
+                            if (s.sqrMagnitude > 1.0f)
+                            {
+                                rooms[j].Nudge(b.size * args.NudgeMultiplier);
+                                rooms[k].Nudge(-b.size * args.NudgeMultiplier);
+                                moves++;
+                            }
                         }
                     }
                 }
@@ -171,8 +218,6 @@ public class DunGen : MonoBehaviour
                 moves = 0;
             }
         }
-
-        Debug.Log("Complete");
     }
 
     IEnumerator StartAndEnd()
@@ -233,7 +278,7 @@ public class DunGen : MonoBehaviour
                 Debug.LogException(e);
             }
             List<Room> validRooms = new List<Room>();
-            int cons = Random.Range(2, 4);
+            int cons = Random.Range(5, 10);
             for (int j = 0; j < cons; j++)
             {
                 Vector3 dir = nearRooms[j].Position - rooms[i].Position;
@@ -307,7 +352,7 @@ public class DunGen : MonoBehaviour
                         connections.Add(c1);
 
                         path = GetPath(a.Position, b.Position);
-
+                        /*
                         GameObject go = new GameObject("Connection", typeof(LineRenderer));
                         go.transform.parent = transform;
                         LineRenderer lr = go.GetComponent<LineRenderer>();
@@ -322,7 +367,7 @@ public class DunGen : MonoBehaviour
                             lr.SetPosition(p, path[p]);
                         }
                         
-                        lr.sharedMaterial = args.corridorMat;
+                        lr.sharedMaterial = args.corridorMat;*/
                     }
                 }
             }
@@ -346,7 +391,19 @@ public class DunGen : MonoBehaviour
     IEnumerator Pathfind()
     {        
         yield return new WaitForEndOfFrame();
-        Room goal = boss;
+        Diag.Stopwatch graphTimer = Diag.Stopwatch.StartNew();
+        Graph<Room> MST = Graph<Room>.BuildMST(roomGraph, start);
+
+        Debug.Log($"Build MST in: {graphTimer.ElapsedMilliseconds}ms"); graphTimer.Restart();
+        //yield return new WaitForEndOfFrame();
+        //yield return new WaitForSeconds(2.0f);
+
+        MST_Path = Graph<Room>.TraverseMST(MST);
+
+        Debug.Log($"Traverse MST in: {graphTimer.ElapsedMilliseconds}ms"); graphTimer.Stop();
+        yield return new WaitForSeconds(0.5f);
+
+        /*Room goal = boss;
         float d(Room rm, Room g) { return Vector3.Distance(rm.Position, g.Position); }
         float h(Room rm) { return d(rm, goal); }
 
@@ -424,7 +481,7 @@ public class DunGen : MonoBehaviour
             Debug.LogWarning("Failed pathfinding?!");
 
         }
-
+        */
 
     }
     List<Vector3> GetPath(Vector3 start, Vector3 end, bool doY = false)
@@ -476,9 +533,43 @@ public class DunGen : MonoBehaviour
 
     private void OnDrawGizmos()
     {
-        Gizmos.color = Color.green;
+
+        /*if(debugStuff.drawPath && path != null && path.Count > 1)
+        {
+            Gizmos.color = Color.red;
+            for (int i =0; i < path.Count -1; i++)
+            {
+                Gizmos.DrawLine(path[i].Position, path[i+1].Position);
+            }
+        }*/
+
+        /*if (debugStuff.drawPathfinder && currentRoom != null)
+        {
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawSphere(currentRoom.Position, 1.0f);
+        }*/
+        if (debugStuff.drawBounds)
+        {
+            for (int i = 0; i < rooms.Count; i++)
+            {
+                Gizmos.color = Color.white;
+                Gizmos.DrawCube(rooms[i].bounds.center, rooms[i].bounds.size);
+            }
+            for (int i = 0; i < rooms.Count; i++)
+            {
+                Gizmos.color = Color.black;
+                Gizmos.DrawWireCube(rooms[i].bounds.center, rooms[i].bounds.size);
+            }
+            if (fullBounds != null)
+            {
+                Gizmos.color = Color.yellow;
+                Gizmos.DrawWireCube(fullBounds.center, fullBounds.size);
+            }
+        }
+
         if (debugStuff.drawConnections && roomGraph != null)
         {
+            Gizmos.color = Color.green;
             /*foreach (Room rm in rooms)
             {
                 if (rm.connections.Count > 0)
@@ -489,30 +580,25 @@ public class DunGen : MonoBehaviour
                     }
                 }
             }*/
-            for(int i=0; i < roomGraph.Nodes.Count; i++)
+            for (int i = 0; i < roomGraph.Nodes.Count; i++)
             {
                 if (roomGraph.Nodes[i].Neighbors != null && roomGraph.Nodes[i].Neighbors.Count > 0)
                 {
-                    for (int j=0; j < roomGraph.Nodes[i].Neighbors.Count; j++)
+                    for (int j = 0; j < roomGraph.Nodes[i].Neighbors.Count; j++)
                     {
                         Gizmos.DrawLine(roomGraph.Nodes[i].Value.Position, roomGraph.Nodes[i].Neighbors[j].Value.Position);
                     }
                 }
             }
         }
-        if(debugStuff.drawPath && path != null && path.Count > 1)
+
+        if (debugStuff.drawPathfinder && MST_Path != null && MST_Path.Count > 1)
         {
             Gizmos.color = Color.red;
-            for (int i =0; i < path.Count -1; i++)
+            for (int i = 0; i < MST_Path.Count; i++)
             {
-                Gizmos.DrawLine(path[i].Position, path[i+1].Position);
+                Gizmos.DrawLine(MST_Path[i].Item1.Position, MST_Path[i].Item2.Position);
             }
-        }
-
-        if(debugStuff.drawPathfinder && currentRoom != null)
-        {
-            Gizmos.color = Color.yellow;
-            Gizmos.DrawSphere(currentRoom.Position, 1.0f);
         }
     }
 }

@@ -10,6 +10,7 @@ public class Room : MonoBehaviour
     public Vector3 Size;
     public Bounds bounds;
     public Bounds trueBounds;
+    public float Radius = 0.0f;
     float buffer = 1.0f;
 
     public bool StartRoom = false;
@@ -46,6 +47,7 @@ public class Room : MonoBehaviour
         trueBounds = new Bounds(Position, Size);
         transform.localScale = Size;
         transform.position = Position;
+        Radius = Mathf.Max(Size.x * 0.5f, Size.z * 0.5f);
     }
 
     public void MakeStart()
@@ -59,6 +61,8 @@ public class Room : MonoBehaviour
         trueBounds = new Bounds(Position, Size);
         transform.localScale = Size;
         transform.position = Position;
+        Radius = Mathf.Max(Size.x * 0.5f, Size.z * 0.5f);
+
         gameObject.name = "Start";
         GetComponent<Renderer>().material.SetColor("_Color", Color.green);
     }
@@ -73,7 +77,9 @@ public class Room : MonoBehaviour
         bounds = new Bounds(Position, Size * buffer);
         trueBounds = new Bounds(Position, Size);
         transform.localScale = Size;
-        transform.position = Position; 
+        transform.position = Position;
+        Radius = Mathf.Max(Size.x * 0.5f, Size.z * 0.5f);
+
         gameObject.name = "End";
         GetComponent<Renderer>().material.SetColor("_Color", Color.red);
     }
@@ -153,5 +159,10 @@ public class Room : MonoBehaviour
         if (x == 0)
             return 1;
         return 0;
+    }
+
+    public static bool QuickOverlap(Room a, Room b)
+    {
+        return (Vector3.SqrMagnitude(b.Position - a.Position) < Mathf.Pow(a.Radius + b.Radius, 2));
     }
 }
