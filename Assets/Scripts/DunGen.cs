@@ -362,6 +362,10 @@ public class DunGen : MonoBehaviour
                 {
                     continue;
                 }
+                if (!current.bufferBound.Intersects(other.bufferBound))
+                {
+                    continue;
+                }
                 Direction adjacency = Room.GetAdjacency(current, other);
                 //TODO: also need to check that there is overlap NOT JUST adjacency
                 if(adjacency == Direction.NONE)
@@ -426,10 +430,10 @@ public class DunGen : MonoBehaviour
                     roomGraph.Remove(current);
                 }
             }
-            Debug.Log($"Removals = {removals}");
             if (debugStuff.slow)
                 yield return new WaitForSeconds(0.05f);
         }
+        Debug.Log($"Removals = {removals}");
     }
     IEnumerator ConnectRooms()
     {
@@ -643,7 +647,6 @@ public class DunGen : MonoBehaviour
 
     private void OnDrawGizmos()
     {
-
         /*if(debugStuff.drawPath && path != null && path.Count > 1)
         {
             Gizmos.color = Color.red;
@@ -667,6 +670,12 @@ public class DunGen : MonoBehaviour
             }*/
             for (int i = 0; i < rooms.Count; i++)
             {
+                Color c = Color.yellow;
+                c.a = 0.5f;
+                Gizmos.DrawWireCube(rooms[i].bufferBound.center, rooms[i].bufferBound.size);
+            }
+            for (int i = 0; i < rooms.Count; i++)
+            {
                 Gizmos.color = Color.yellow;
                 Gizmos.DrawWireCube(rooms[i].bounds.center, rooms[i].bounds.size);
             }
@@ -679,7 +688,10 @@ public class DunGen : MonoBehaviour
 
         if (debugStuff.drawConnections && roomGraph != null)
         {
-            Gizmos.color = Color.green;
+            Color c = Color.green;
+            if(debugStuff.drawPathfinder)
+                c.a = 0.5f;
+            Gizmos.color = c;
             /*foreach (Room rm in rooms)
             {
                 if (rm.connections.Count > 0)

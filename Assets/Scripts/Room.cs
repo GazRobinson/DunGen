@@ -55,7 +55,7 @@ public class Room : MonoBehaviour
 
     public void MakeStart()
     {
-        Size = new Vector3(6.0f, 3.0f, 6.0f);
+        Size = Vector3.Max(Size, new Vector3(6.0f, 3.0f, 6.0f));
 
         Position.x = Mathf.Round(Position.x) + (Size.x % 2 > 0 ? 0.5f : 0.0f);
         Position.z = Mathf.Round(Position.z) + (Size.z % 2 > 0 ? 0.5f : 0.0f);
@@ -99,6 +99,7 @@ public class Room : MonoBehaviour
 
         transform.position = Position;
         bounds.center = Position;
+        bufferBound.center = Position;
         //bounds.size = Size * buffer;
         //bounds = new Bounds(Position, Size * buffer);
     }
