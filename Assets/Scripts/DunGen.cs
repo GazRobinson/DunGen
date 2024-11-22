@@ -1,11 +1,24 @@
+//#define DEBUGGING
+
 using JetBrains.Annotations;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Unity.VisualScripting.Antlr3.Runtime.Collections;
 using UnityEditor;
 using UnityEngine;
 using Diag = System.Diagnostics;
+using Extensions;
+
+public enum Direction
+{
+    NONE,
+    UP,
+    DOWN,
+    LEFT,
+    RIGHT
+}
 
 [System.Serializable]
 public class RoomDetails
@@ -13,8 +26,7 @@ public class RoomDetails
     public float MinArea = 4;
     public float MaxArea = 30;
 
-    [Range(1.01f, 2.0f)]
-    public float Buffer = 1.1f;
+    public float Buffer = 0.1f;
 
 }
 
@@ -31,6 +43,7 @@ public class DunGenParams
 
     public bool BuildRooms = true;
     public bool LinkRooms = true;
+    public bool Pathfind = true;
 }
 
 [System.Serializable]
@@ -99,6 +112,8 @@ public class DunGen : MonoBehaviour
     //Debug
     private Diag.Stopwatch stopwatch;
 
+    private float stepTime = 0.03f;
+
     IEnumerator Gen()
     {
         Diag.Stopwatch GenWatch = Diag.Stopwatch.StartNew();
@@ -137,6 +152,9 @@ public class DunGen : MonoBehaviour
             yield return StartCoroutine(LinkRooms());
             Debug.Log($"Link Rooms in: {stopwatch.ElapsedMilliseconds}ms"); stopwatch.Restart();
             //yield return StartCoroutine(ConnectRooms()); //This was for when I used LineRenderers. Could come back
+        }
+        if (args.Pathfind)
+        {
             yield return StartCoroutine(Pathfind());
             Debug.Log($"Pathfind in: {stopwatch.ElapsedMilliseconds}ms"); stopwatch.Restart();
         }
@@ -157,60 +175,96 @@ public class DunGen : MonoBehaviour
         }
     }
 
+
     IEnumerator DistributeRooms()
     {
-        yield return new WaitForSeconds(0.1f);
+        yield return null;
         int i = 0;
         int moves = 0;
+        int skipped = 0;
+        int comparisons = 0;
         Bounds b = new Bounds();
-        while (i < args.MaxDistIterations)
+        int rmCount = rooms.Count;
+#if DEBUGGING
+        Diag.Stopwatch iterationTimer = new Diag.Stopwatch();
+        Diag.Stopwatch totalIterationTimer = new Diag.Stopwatch();
+        Diag.Stopwatch boundsTime = new Diag.Stopwatch();
+        Diag.Stopwatch nudgeTime = new Diag.Stopwatch();
+#endif
+        List<Room> movingList = new List<Room>(rooms);
+        List<Room> nextMovingList = new List<Room>();
+        while (movingList.Count > 0 && i < args.MaxDistIterations)
         {
-            for (int j = 0; j < rooms.Count; j++)
+#if DEBUGGING
+            iterationTimer.Restart();
+            totalIterationTimer.Start();
+#endif
+            for (int j = 0; j < movingList.Count; j++)
             {
-                for (int k = 0; k < rooms.Count; k++)
+                Room current = movingList[j];
+                Room other = null;
+                for (int k = 0; k < rmCount; k++)
                 {
-                    if (j == k)
+                    other = rooms[k];
+                    if (current == other/*j == k*/)
                         continue;
-                    if (Room.QuickOverlap(rooms[j], rooms[k])) 
+                    comparisons++;
+                    if (Room.QuickerOverlap(ref current, ref other)) 
                     {
-                        if (rooms[j].bounds.Intersects(rooms[k].bounds))
+                        bool intersects = current.bounds.Intersects(other.bounds);
+                        if (intersects)
                         {
-                            b.SetMinMax(Vector3.Max(rooms[j].bounds.min, rooms[k].bounds.min),
-                                Vector3.Min(rooms[j].bounds.max, rooms[k].bounds.max));
+#if DEBUGGING
+    nudgeTime.Start();
+#endif
+                            b.SetMinMax(Vector3.Max(current.bounds.min, other.bounds.min),
+                                Vector3.Min(current.bounds.max, other.bounds.max));
                             Vector3 s = b.size;
                             s.y = 0.0f;
-                            s.x = rooms[j].Position.x < rooms[k].Position.x ? -s.x : s.x;
-                            s.z = rooms[j].Position.z < rooms[k].Position.z ? -s.z : s.z;
+                            s.x = current.Position.x < other.Position.x ? -s.x : s.x;
+                            s.z = current.Position.z < other.Position.z ? -s.z : s.z;
                             if (Mathf.Abs(s.x) < Mathf.Abs(s.z))
-                            {
                                 s.z = 0.0f;
-                            }
                             else
-                            {
                                 s.x = 0.0f;
-                            }
                             //s.z = Random.value > 0.5f ? -s.z : s.z;
                             b.size = s;
-                            if (s.sqrMagnitude > 1.0f)
+                            if (s.sqrMagnitude > 0.1f)
                             {
-                                rooms[j].Nudge(b.size * args.NudgeMultiplier);
-                                rooms[k].Nudge(-b.size * args.NudgeMultiplier);
+                                current.Nudge(b.size * args.NudgeMultiplier);
+                                other.Nudge(-b.size * args.NudgeMultiplier);
+                                nextMovingList.Add(current);
+                                nextMovingList.Add(other);
                                 moves++;
                             }
+#if DEBUGGING
+                            nudgeTime.Stop();
+#endif
+                        }
+                        else
+                        {
+                            skipped++;
                         }
                     }
                 }
                 if (debugStuff.vSlow)
                     yield return new WaitForEndOfFrame();
             }
+
+#if DEBUGGING
+            totalIterationTimer.Stop();
+            iterationTimer.Stop();
+            Debug.Log($"Time: {iterationTimer.ElapsedMilliseconds}. Moves: {moves}. List Length for next = {movingList.Count}");
+#endif
+            movingList = nextMovingList.Distinct().ToList();
+            nextMovingList.Clear();
             if(debugStuff.slow)
                 yield return new WaitForSeconds(0.025f);
             i++;
-            if(debugStuff.verbose)
-                Debug.Log("Moves: " + moves);
+
             if (moves == 0)
             {
-                Debug.Log("Done early");
+                Debug.Log("Done early in " + i + " iterations");
                 break;
             }
             else
@@ -218,6 +272,16 @@ public class DunGen : MonoBehaviour
                 moves = 0;
             }
         }
+        /*for (int j = 0; j < rmCount; j++)
+        {
+            rooms[j].Square();
+        }*/
+
+#if DEBUGGING
+        Debug.Log($"Comparisons = {comparisons}, Skips = {skipped} ");
+        Debug.Log($"Time spent checking intersection = {boundsTime.ElapsedMilliseconds}\nTime spent nudging = {nudgeTime.ElapsedMilliseconds}\n" +
+            $"Totla time spent iterating = {totalIterationTimer.ElapsedMilliseconds}");
+#endif
     }
 
     IEnumerator StartAndEnd()
@@ -257,40 +321,69 @@ public class DunGen : MonoBehaviour
 
     IEnumerator LinkRooms()
     {
+        int removals = 0;
         roomGraph = new Graph<Room>();
-        for (int i = 0; i < rooms.Count; i++)
+        int c = rooms.Count;
+        for (int i = 0; i < c; i++)
         {
             roomGraph.AddNode(rooms[i]);
         }
 
-            yield return new WaitForEndOfFrame();
+        yield return new WaitForEndOfFrame();
         List<Room> nearRooms = new List<Room>(rooms);
         for (int i = 0; i < rooms.Count; i++)
         {
+            Room current = rooms[i];
+            if (!current.gameObject.activeSelf)
+            {
+                continue;
+            }
             nearRooms = new List<Room>(rooms);
-            nearRooms.Remove(rooms[i]);
+            nearRooms.Remove(current);
             try
             {
-                nearRooms.Sort((a, b) => Vector3.Distance(rooms[i].Position, a.Position) > Vector3.Distance(rooms[i].Position, b.Position) ? 1 : -1);
+                nearRooms.Sort((a, b) => Vector3.Distance(current.Position, a.Position) > Vector3.Distance(current.Position, b.Position) ? 1 : -1);
             }
             catch(System.Exception e)
             {
                 Debug.LogException(e);
             }
+
             List<Room> validRooms = new List<Room>();
-            int cons = Random.Range(5, 10);
-            for (int j = 0; j < cons; j++)
+            int maxConnections = Random.Range(1, 5);
+            int connections = 0;
+            int index = 0;
+            HashSet<Direction> taken = new HashSet<Direction>();
+            while (connections < maxConnections && index < nearRooms.Count)
             {
-                Vector3 dir = nearRooms[j].Position - rooms[i].Position;
+                Room other = nearRooms[index];
+                index++;
+                if (!other.gameObject.activeSelf)
+                {
+                    continue;
+                }
+                Direction adjacency = Room.GetAdjacency(current, other);
+                //TODO: also need to check that there is overlap NOT JUST adjacency
+                if(adjacency == Direction.NONE)
+                {
+                    continue;
+                }
+                if (taken.Contains(adjacency))
+                {
+                    continue;
+                }
+                taken.Add(adjacency);
+                validRooms.Add(other);
+                /*Vector3 dir = other.Position - current.Position;
                 float dist = dir.magnitude;
                 dir.Normalize();
-                RaycastHit[] info = Physics.RaycastAll(rooms[i].Position, dir, dist);
+                RaycastHit[] info = Physics.RaycastAll(current.Position, dir, dist);
                 if (info.Length > 0)
                 {
                     bool valid = true;
                     foreach(RaycastHit hit in info)
                     {
-                        if(hit.collider.gameObject == rooms[i].gameObject || hit.collider.gameObject == nearRooms[j].gameObject)
+                        if(hit.collider.gameObject == current.gameObject || hit.collider.gameObject == nearRooms[j].gameObject)
                         {
                             continue;
                         }
@@ -303,21 +396,37 @@ public class DunGen : MonoBehaviour
                     }
                     if (valid)
                     {
-                        validRooms.Add(nearRooms[j]);
+                        validRooms.Add(other);
                     }
                 }
                 else
                 {
-                    validRooms.Add(nearRooms[j]);
+                    validRooms.Add(other);
+                }*/
+            }
+            if (validRooms.Count > 0)
+            {
+                foreach (Room rm in validRooms)
+                {
+                    roomGraph.AddUndirectedEdge(current, rm, Mathf.FloorToInt(Vector3.Distance(current.Position, rm.Position)));
+                    current.connections.Add(rm);
+                    rm.connections.Add(current);
                 }
             }
-            foreach (Room rm in validRooms)
+            else
             {
-                roomGraph.AddUndirectedEdge(rooms[i], rm, Mathf.FloorToInt(Vector3.Distance(rooms[i].Position, rm.Position)));
-                rooms[i].connections.Add(rm);
-                rm.connections.Add(rooms[i]);
+                if(current == start)
+                {
+                    Debug.LogError("The start room is not connected to anything!");
+                }
+                else
+                {
+                    removals++;
+                    current.gameObject.SetActive(false);
+                    roomGraph.Remove(current);
+                }
             }
-
+            Debug.Log($"Removals = {removals}");
             if (debugStuff.slow)
                 yield return new WaitForSeconds(0.05f);
         }
@@ -373,7 +482,7 @@ public class DunGen : MonoBehaviour
             }
 
             if (debugStuff.slow)
-                yield return new WaitForSeconds(0.05f);
+                yield return new WaitForSeconds(stepTime);
         }
     }
 
@@ -384,7 +493,7 @@ public class DunGen : MonoBehaviour
         {
             rooms[i].BuildRoom(ref mapTiles);
             if(debugStuff.slow)
-                yield return new WaitForSeconds(0.15f);
+                yield return new WaitForSeconds(stepTime);
         }
     }
 
@@ -521,6 +630,7 @@ public class DunGen : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
+        stepTime = 2.0f / args.RoomsToGenerate;
         StartCoroutine(Gen());
     }
 
@@ -550,19 +660,19 @@ public class DunGen : MonoBehaviour
         }*/
         if (debugStuff.drawBounds)
         {
-            for (int i = 0; i < rooms.Count; i++)
+            /*for (int i = 0; i < rooms.Count; i++)
             {
                 Gizmos.color = Color.white;
                 Gizmos.DrawCube(rooms[i].bounds.center, rooms[i].bounds.size);
-            }
+            }*/
             for (int i = 0; i < rooms.Count; i++)
             {
-                Gizmos.color = Color.black;
+                Gizmos.color = Color.yellow;
                 Gizmos.DrawWireCube(rooms[i].bounds.center, rooms[i].bounds.size);
             }
             if (fullBounds != null)
             {
-                Gizmos.color = Color.yellow;
+                Gizmos.color = Color.green;
                 Gizmos.DrawWireCube(fullBounds.center, fullBounds.size);
             }
         }
